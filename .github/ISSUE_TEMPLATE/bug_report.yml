@@ -1,0 +1,87 @@
+name: Bug report
+description: Report a reproducible ESP32 Board Test problem
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem.
+
+        Before attaching logs publicly, remove/review sensitive or local data such as MAC addresses, local IP addresses, BSSIDs, SSIDs, serial diagnostics, and other environment-specific identifiers.
+
+  - type: input
+    id: version
+    attributes:
+      label: ESP32 Board Test version
+      description: "Example: 0.5.0"
+      placeholder: 0.5.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux - Debian/Ubuntu
+        - Linux - other
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: board
+    attributes:
+      label: ESP32 profile / board type
+      options:
+        - esp32
+        - esp32-c3
+        - esp32-s3
+        - esp32-s3-n16r8
+        - Detection failed / unknown
+    validations:
+      required: true
+
+  - type: dropdown
+    id: soak
+    attributes:
+      label: Home-network stability soak enabled?
+      options:
+        - "true"
+        - "false"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Connect ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant console output / log excerpt
+      description: Do not paste secrets. Review identifiers before posting publicly.
+      render: text
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Hardware variant, USB/UART bridge, distro, printer backend, etc.

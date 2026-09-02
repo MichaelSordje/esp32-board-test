@@ -1,0 +1,421 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate source, config and version
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up minimum supported Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+
+      - name: Check Python syntax
+        run: python -m compileall -q tools
+
+      - name: Check shell syntax
+        run: bash -n scripts/start-test.sh scripts/label.sh
+
+      - name: Check JSON
+        run: python -m json.tool config/test-settings.json > /dev/null
+
+      - name: Check project version
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path("firmware/include/version.h")
+          text = path.read_text(encoding="utf-8")
+
+          match = re.search(
+              r'#define\s+HWTEST_VERSION\s+"([^"]+)"',
+              text,
+          )
+          if not match:
+              raise SystemExit(
+                  "HWTEST_VERSION is missing in firmware/include/version.h"
+              )
+
+          version = match.group(1)
+          if not re.fullmatch(
+              r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)",
+              version,
+          ):
+              raise SystemExit(
+                  "HWTEST_VERSION must use MAJOR.MINOR.PATCH, "
+                  f"got: {version}"
+              )
+
+          ref = os.environ.get("GITHUB_REF", "")
+          if ref.startswith("refs/tags/"):
+              tag = ref.removeprefix("refs/tags/")
+              expected = f"v{version}"
+              if tag != expected:
+                  raise SystemExit(
+                      f"Git tag {tag} does not match "
+                      f"project version {expected}"
+                  )
+
+          print(f"Project version: {version}")
+          PY
+
+  linux-smoke:
+    name: Linux host smoke test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up minimum supported Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+
+      - name: Install project requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Check Linux CLI entry points
+        run: |
+          python tools/run_test.py --help
+          python tools/test_runner.py --help
+          python tools/flash_reference.py --help
+          python tools/linux_label.py --help
+          python tools/linux_postprocess.py --help
+
+      - name: Check configuration model
+        run: |
+          python - <<'PY'
+          import copy
+          import json
+          import sys
+
+          sys.path.insert(0, "tools")
+          import test_orchestrator
+          import test_runner
+
+          with open(
+              "config/test-settings.json",
+              "r",
+              encoding="utf-8",
+          ) as handle:
+              settings = json.load(handle)
+
+          normal = test_orchestrator.resolve_effective_test_config(
+              settings,
+              "esp32",
+          )
+          assert normal["soak"] is True
+
+          no_soak = copy.deepcopy(settings)
+          no_soak["tests"]["default"]["soak"]["enabled"] = False
+          resolved = test_orchestrator.resolve_effective_test_config(
+              no_soak,
+              "esp32",
+          )
+          assert resolved["soak"] is False
+          assert resolved["ping"] is True
+          assert resolved["udp"] is True
+          assert resolved["heap_integrity"] is True
+
+          profile_override = copy.deepcopy(settings)
+          profile_override["tests"]["profiles"]["esp32"]["soak"] = {"enabled": False}
+          resolved_profile = (
+              test_orchestrator.resolve_effective_test_config(
+                  profile_override,
+                  "esp32",
+              )
+          )
+          assert resolved_profile["soak"] is False
+
+          unknown_root = copy.deepcopy(settings)
+          unknown_root["obsolete_setting"] = False
+          try:
+              test_orchestrator.resolve_effective_test_config(
+                  unknown_root,
+                  "esp32",
+              )
+          except RuntimeError as exc:
+              assert "unknown top-level setting" in str(exc)
+          else:
+              raise AssertionError(
+                  "Unknown top-level setting unexpectedly accepted"
+              )
+
+          unknown_rf = copy.deepcopy(settings)
+          unknown_rf["tests"]["default"]["rf_quality"]["obsolete_option"] = 4
+          try:
+              test_orchestrator.resolve_effective_test_config(
+                  unknown_rf,
+                  "esp32",
+              )
+          except RuntimeError as exc:
+              assert "unknown option" in str(exc)
+          else:
+              raise AssertionError(
+                  "Unknown RF option unexpectedly accepted"
+              )
+
+          assert test_runner.resolve_label_mode({}) == "off"
+          assert test_runner.should_run_label("auto") is True
+          assert test_runner.should_run_label("ask") is True
+          assert test_runner.should_run_label("off") is False
+
+          all_disabled = copy.deepcopy(settings)
+          for key in (
+              "ram", "psram", "flash", "cpu", "timer",
+              "rng", "nvs", "ble", "deep_sleep",
+          ):
+              all_disabled["tests"]["default"][key] = False
+          for key in (
+              "wifi", "rf_quality", "soak", "reconnect",
+              "ble_coexistence",
+          ):
+              all_disabled["tests"]["default"][key]["enabled"] = False
+          all_disabled["tests"]["default"]["soak"]["ping"] = False
+          all_disabled["tests"]["default"]["soak"]["udp"] = False
+          all_disabled["tests"]["default"]["soak"]["heap_integrity"]["enabled"] = False
+          resolved_disabled = (
+              test_orchestrator.resolve_effective_test_config(
+                  all_disabled,
+                  "esp32",
+              )
+          )
+          assert not any(resolved_disabled.values())
+          assert (
+              test_orchestrator.is_complete_quality_suite(
+                  resolved_disabled
+              )
+              is False
+          )
+          assert (
+              test_runner.resolve_wifi_credentials(
+                  resolved_disabled
+              )
+              == ("", "")
+          )
+          assert (
+              test_runner.requires_ping_command(
+                  resolved_disabled
+              )
+              is False
+          )
+
+          assert (
+              test_runner.requires_ping_command(normal)
+              is True
+          )
+          reconnect_only = dict(resolved_disabled)
+          reconnect_only["reconnect"] = True
+          assert (
+              test_runner.requires_ping_command(
+                  reconnect_only
+              )
+              is True
+          )
+          coex_only = dict(resolved_disabled)
+          coex_only["ble_coexistence"] = True
+          assert (
+              test_runner.requires_ping_command(
+                  coex_only
+              )
+              is True
+          )
+
+          print("Configuration model: PASS")
+          PY
+
+      - name: Generate label artifacts
+        run: |
+          mkdir -p results/001-E32
+          cat > results/001-E32/summary.json <<'JSON'
+          {
+            "board_id": "001-E32",
+            "result": "PASS",
+            "timestamp": "2026-08-26T07:00:00+00:00",
+            "quality_suite_complete": false
+          }
+          JSON
+          python tools/linux_label.py --summary results/001-E32/summary.json --no-print
+          test -s results/001-E32/label_001-E32.png
+
+          python tools/label_generator.py results/001-E32/summary.json --format brother-lbx
+          test -s results/001-E32/label_001-E32_brother.lbx
+
+      - name: Check automatic label policy
+        run: |
+          python - <<'PY'
+          import json
+          import sys
+          import tempfile
+          from pathlib import Path
+
+          sys.path.insert(0, "tools")
+          import linux_postprocess
+
+          with tempfile.TemporaryDirectory() as tmp:
+              root = Path(tmp)
+              result_dir = root / "001-E32"
+              result_dir.mkdir(parents=True)
+              summary_path = result_dir / "summary.json"
+              summary_path.write_text(
+                  json.dumps(
+                      {
+                          "board_id": "001-E32",
+                          "result": "PASS",
+                          "timestamp": "2026-08-26T07:00:00+00:00",
+                          "quality_suite_complete": False,
+                      }
+                  ),
+                  encoding="utf-8",
+              )
+
+              calls = []
+              linux_postprocess.RESULTS_ROOT = root
+              linux_postprocess.load_effective_settings = (
+                  lambda: {"label": {"mode": "auto"}}
+              )
+              linux_postprocess.run_label_from_summary = (
+                  lambda path, ask_before_print: calls.append(
+                      (Path(path), ask_before_print)
+                  )
+              )
+              linux_postprocess._open_report = lambda path: None
+
+              linux_postprocess.postprocess({})
+
+              assert calls == [(summary_path, False)]
+
+          print("Automatic label policy: PASS")
+          PY
+
+  windows-smoke:
+    name: Windows host smoke test
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up minimum supported Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+
+      - name: Install project requirements
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Check PowerShell syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Get-ChildItem scripts -Filter *.ps1 | ForEach-Object {
+            $Tokens = $null
+            $Errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$Tokens,
+              [ref]$Errors
+            ) | Out-Null
+
+            if ($Errors.Count -gt 0) {
+              $Errors | ForEach-Object {
+                Write-Error "$($_.Extent.File):$($_.Extent.StartLineNumber): $($_.Message)"
+              }
+              exit 1
+            }
+          }
+
+      - name: Check Windows CLI entry points
+        shell: pwsh
+        run: |
+          python tools/run_test.py --help
+          python tools/test_runner.py --help
+          python tools/flash_reference.py --help
+
+      - name: Generate generic Windows PNG label
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force results/001-E32 | Out-Null
+          @'
+          {
+            "board_id": "001-E32",
+            "result": "PASS",
+            "timestamp": "2026-08-26T07:00:00+00:00"
+          }
+          '@ | Set-Content -Encoding UTF8 results/001-E32/summary.json
+
+          python tools/label_generator.py `
+            results/001-E32/summary.json `
+            --format png `
+            --output results/001-E32/label_001-E32.png
+
+          if (-not (Test-Path results/001-E32/label_001-E32.png)) {
+            throw "PNG label was not generated."
+          }
+
+  platformio:
+    name: Build ${{ matrix.environment }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        environment:
+          - esp32
+          - esp32-c3
+          - esp32-s3
+          - esp32-s3-n16r8
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up minimum supported Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install platformio==6.1.19
+
+      - name: Build DUT firmware
+        run: |
+          export PLATFORMIO_CORE_DIR="$RUNNER_TEMP/platformio-dut-${{ matrix.environment }}"
+          pio run -e ${{ matrix.environment }}
+
+      - name: Release DUT build space
+        run: |
+          rm -rf "$RUNNER_TEMP/platformio-dut-${{ matrix.environment }}" .pio
+
+      - name: Build reference firmware
+        run: |
+          export PLATFORMIO_CORE_DIR="$RUNNER_TEMP/platformio-reference-${{ matrix.environment }}"
+          pio run --project-dir reference-firmware -e ${{ matrix.environment }}

@@ -1,0 +1,139 @@
+{
+  "label": {
+    "mode": "off",
+    "backend": "windows",
+    "printer_name": "",
+    "linux_backend": "cups",
+    "linux_printer_name": "",
+    "cups_media": "",
+    "cups_options": {},
+    "width_mm": 62.0,
+    "height_mm": 0.0,
+    "dpi": 300,
+    "margin_mm": 2.0,
+    "brother_template": "templates/label_brother.lbx"
+  },
+  "serial": {
+    "dut_baud": 115200,
+    "reference_baud": 115200
+  },
+  "network": {
+    "udp_port": 33333,
+    "ping_timeout_ms": 1000
+  },
+  "peer_comparison": {
+    "minimum_samples": 3,
+    "warn_ratio": 0.8,
+    "outlier_ratio": 0.65
+  },
+  "tests": {
+    "default": {
+      "ram": true,
+      "psram": true,
+      "flash": true,
+      "cpu": true,
+      "timer": true,
+      "rng": true,
+      "nvs": true,
+      "ble": true,
+      "deep_sleep": true,
+      "wifi": {
+        "enabled": true,
+        "warmup_seconds": 30,
+        "output_power_dbm": null
+      },
+      "rf_quality": {
+        "enabled": true,
+        "reference_mac": "",
+        "channel": 6,
+        "reference_tx_power_dbm": 20,
+        "packets_per_repetition": 100,
+        "packet_interval_ms": 20,
+        "repetitions_per_direction": 3,
+        "thresholds": {
+          "reference_to_dut_min_rssi_dbm": null,
+          "dut_to_reference_min_rssi_dbm": null,
+          "max_loss_percent": null
+        }
+      },
+      "soak": {
+        "enabled": true,
+        "duration_minutes": 15,
+        "probe_interval_seconds": 1.0,
+        "ping": true,
+        "udp": true,
+        "heap_integrity": {
+          "enabled": true,
+          "interval_seconds": 30
+        },
+        "thresholds": {
+          "ping_loss_warn_percent": 0.5,
+          "ping_loss_fail_percent": 2.0,
+          "udp_loss_warn_percent": 0.5,
+          "udp_loss_fail_percent": 2.0,
+          "longest_outage_warn_seconds": 2.0,
+          "longest_outage_fail_seconds": 5.0,
+          "disconnects_warn": 1,
+          "disconnects_fail": 3,
+          "rssi_warn_dbm": -75,
+          "heap_drop_warn_bytes": 16384,
+          "heap_drop_fail_bytes": 32768,
+          "serial_heartbeat_warn_seconds": 3.0,
+          "serial_heartbeat_fail_seconds": 10.0
+        }
+      },
+      "reconnect": {
+        "enabled": true,
+        "timeout_seconds": 15,
+        "recovery_timeout_seconds": 30,
+        "settle_seconds": 2
+      },
+      "ble_coexistence": {
+        "enabled": true,
+        "duration_seconds": 5.0,
+        "probe_interval_seconds": 0.25
+      }
+    },
+    "profiles": {
+      "esp32": {
+        "rf_quality": {
+          "thresholds": {
+            "reference_to_dut_min_rssi_dbm": -55,
+            "dut_to_reference_min_rssi_dbm": -52,
+            "max_loss_percent": 1.0
+          }
+        }
+      },
+      "esp32-c3": {
+        "wifi": {
+          "output_power_dbm": 10
+        },
+        "rf_quality": {
+          "thresholds": {
+            "reference_to_dut_min_rssi_dbm": -53,
+            "dut_to_reference_min_rssi_dbm": -56,
+            "max_loss_percent": 1.0
+          }
+        }
+      },
+      "esp32-s3": {
+        "rf_quality": {
+          "thresholds": {
+            "reference_to_dut_min_rssi_dbm": -48,
+            "dut_to_reference_min_rssi_dbm": -44,
+            "max_loss_percent": 1.0
+          }
+        }
+      },
+      "esp32-s3-n16r8": {
+        "rf_quality": {
+          "thresholds": {
+            "reference_to_dut_min_rssi_dbm": -48,
+            "dut_to_reference_min_rssi_dbm": -44,
+            "max_loss_percent": 1.0
+          }
+        }
+      }
+    }
+  }
+}
